@@ -1,0 +1,16 @@
+days-before-stale: 30
+days-before-close: 7
+stale-label: stale
+only-issues: true
+remove-stale-when-updated: true
+exempt-issue-labels:
+  - security
+stale-issue-message: |
+  <!-- elusoc-stale-warning -->
+  This issue has been inactive for 30 days. Please share an update, add details,
+  or confirm it is still relevant. If there is no activity within 7 days, the
+  issue will be closed automatically.
+close-issue-message: |
+  <!-- elusoc-stale-closed -->
+  Closing this issue due to prolonged inactivity. If this is still relevant,
+  please reopen and provide the latest context.

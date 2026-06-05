@@ -1,0 +1,32 @@
+name: Security Report
+description: Report a security vulnerability.
+title: "[Security]: "
+labels: [ELUSOC, security]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please avoid sharing sensitive details publicly. If this is a
+        vulnerability that requires confidentiality, use the Security Policy
+        instead (see SECURITY.md in this repository).
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: Provide a high-level overview of the issue.
+    validations:
+      required: true
+  - type: textarea
+    id: impact
+    attributes:
+      label: Impact
+      description: What could an attacker do?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      description: Share steps or proof-of-concept details (if safe to do so).
+    validations:
+      required: false

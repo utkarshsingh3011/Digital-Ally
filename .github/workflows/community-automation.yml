@@ -2,9 +2,9 @@ name: Community Automation
 
 on:
   issues:
-    types: [opened]
+    types: [opened, edited, reopened]
   pull_request:
-    types: [opened]
+    types: [opened, edited, reopened, synchronize]
 
 permissions:
   contents: read
@@ -17,65 +17,69 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Ensure ELUSOC label exists
+      # Ensure required labels exist before any automation runs.
+      - name: Ensure required labels exist
         uses: actions/github-script@v7
         with:
           script: |
-            const labelName = 'ELUSOC';
-            const labelConfig = {
-              name: labelName,
-              color: '0E8A16',
-              description: 'ELUSOC Community Contribution'
-            };
+            const requiredLabels = [
+              { name: 'ELUSOC', color: '0E8A16', description: 'ELUSOC Community Contribution' },
+              { name: 'bug', color: 'D73A4A', description: 'Something is not working' },
+              { name: 'enhancement', color: 'A2EEEF', description: 'New feature or improvement' },
+              { name: 'documentation', color: '0075CA', description: 'Documentation updates' },
+              { name: 'testing', color: 'BFDADC', description: 'Testing related work' },
+              { name: 'ui/ux', color: 'F9D0C4', description: 'User interface and experience' },
+              { name: 'frontend', color: 'C2E0C6', description: 'Frontend changes' },
+              { name: 'backend', color: 'F4C6E7', description: 'Backend changes' },
+              { name: 'security', color: 'B60205', description: 'Security related issues' },
+              { name: 'performance', color: 'FBCA04', description: 'Performance improvements' },
+              { name: 'question', color: 'D876E3', description: 'Questions and support' },
+              { name: 'duplicate', color: 'CFD3D7', description: 'Duplicate issue or PR' },
+              { name: 'good first issue', color: '7057FF', description: 'Good for newcomers' },
+              { name: 'stale', color: 'EDEDED', description: 'Inactive for too long' },
+              { name: 'hacktoberfest', color: 'FF8C00', description: 'Hacktoberfest participation' },
+              { name: 'gssoc', color: '5319E7', description: 'GSSoC participation' }
+            ];
 
-            try {
-              await github.rest.issues.getLabel({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                name: labelName
-              });
-            } catch (error) {
-              if (error.status === 404) {
-                await github.rest.issues.createLabel({
+            for (const label of requiredLabels) {
+              try {
+                await github.rest.issues.getLabel({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
-                  ...labelConfig
+                  name: label.name
                 });
-              } else {
-                throw error;
+              } catch (error) {
+                if (error.status === 404) {
+                  await github.rest.issues.createLabel({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    ...label
+                  });
+                } else {
+                  throw error;
+                }
               }
             }
-
-      - name: Add ELUSOC label to issue
-        if: ${{ github.event_name == 'issues' }}
-        uses: actions/github-script@v7
-        with:
-          script: |
-            await github.rest.issues.addLabels({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              labels: ['ELUSOC']
-            });
-
-      - name: Add ELUSOC label to pull request
-        if: ${{ github.event_name == 'pull_request' }}
-        uses: actions/github-script@v7
-        with:
-          script: |
-            await github.rest.issues.addLabels({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              labels: ['ELUSOC']
-            });
 
       - name: Welcome on new issue
         if: ${{ github.event_name == 'issues' }}
         uses: actions/github-script@v7
         with:
           script: |
-            const body = `Thank you for opening this issue! 🎉\n\nThe ELUSOC team appreciates your contribution.\n\nA maintainer will review this issue as soon as possible. In the meantime, feel free to provide additional details, screenshots, logs, or reproduction steps that may help with investigation.\n\nWelcome to the community! 🚀`;
+            const marker = '<!-- elusoc-welcome-issue -->';
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              per_page: 100
+            });
+
+            const alreadyWelcomed = comments.some(comment => comment.body.includes(marker));
+            if (alreadyWelcomed) {
+              return;
+            }
+
+            const body = `${marker}\nThank you for opening this issue! 🎉\n\nThe ELUSOC team appreciates your contribution.\n\nA maintainer will review this issue as soon as possible. In the meantime, feel free to provide additional details, screenshots, logs, or reproduction steps that may help with investigation.\n\nWelcome to the community! 🚀`;
 
             await github.rest.issues.createComment({
               owner: context.repo.owner,
@@ -89,7 +93,20 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const body = `Thank you for your contribution! 🚀\n\nYour pull request has been received and is now awaiting review.\n\nA maintainer will review this PR as soon as possible. Please ensure all checks pass and respond to any review feedback promptly.\n\nThank you for helping improve this project! 💙`;
+            const marker = '<!-- elusoc-welcome-pr -->';
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              per_page: 100
+            });
+
+            const alreadyWelcomed = comments.some(comment => comment.body.includes(marker));
+            if (alreadyWelcomed) {
+              return;
+            }
+
+            const body = `${marker}\nThank you for your contribution! 🚀\n\nYour pull request has been received and is now awaiting review.\n\nA maintainer will review this PR as soon as possible. Please ensure all checks pass and respond to any review feedback promptly.\n\nThank you for helping improve this project! 💙`;
 
             await github.rest.issues.createComment({
               owner: context.repo.owner,
@@ -126,3 +143,146 @@ jobs:
             } catch (error) {
               core.warning(`Could not request reviewer: ${error.message}`);
             }
+
+      - name: Auto-label issues by content
+        if: ${{ github.event_name == 'issues' }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: issue } = await github.rest.issues.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number
+            });
+
+            const text = `${issue.title}\n${issue.body || ''}`.toLowerCase();
+            const existing = new Set(issue.labels.map(label => label.name));
+            const add = new Set(['ELUSOC']);
+
+            const containsAny = (keywords) => keywords.some(keyword => text.includes(keyword));
+
+            if (containsAny(['bug', 'crash', 'error', 'exception', 'broken', 'regression', 'fails', 'failure'])) {
+              add.add('bug');
+            }
+            if (containsAny(['feature', 'enhancement', 'request', 'improve', 'proposal', 'support'])) {
+              add.add('enhancement');
+            }
+            if (containsAny(['docs', 'documentation', 'readme', 'guide', 'typo', 'spelling'])) {
+              add.add('documentation');
+            }
+            if (containsAny(['test', 'testing', 'unit test', 'integration', 'e2e'])) {
+              add.add('testing');
+            }
+            if (containsAny(['ui', 'ux', 'user interface', 'layout', 'design', 'style', 'css', 'visual'])) {
+              add.add('ui/ux');
+            }
+            if (containsAny(['frontend', 'client', 'browser', 'react'])) {
+              add.add('frontend');
+            }
+            if (containsAny(['backend', 'server', 'api', 'database', 'db', 'service'])) {
+              add.add('backend');
+            }
+            if (containsAny(['security', 'vulnerability', 'cve', 'xss', 'csrf', 'auth', 'authentication', 'authorization', 'leak'])) {
+              add.add('security');
+            }
+            if (containsAny(['performance', 'slow', 'latency', 'optimize', 'throughput', 'memory', 'cpu'])) {
+              add.add('performance');
+            }
+            if (containsAny(['question', 'how do', 'help', 'support', 'clarify', 'usage'])) {
+              add.add('question');
+            }
+            if (containsAny(['duplicate', 'already exists', 'same as', 'dupe'])) {
+              add.add('duplicate');
+            }
+            if (containsAny(['good first issue', 'beginner', 'starter', 'easy', 'first-timers'])) {
+              add.add('good first issue');
+            }
+
+            const labelsToAdd = [...add].filter(label => !existing.has(label));
+            if (labelsToAdd.length === 0) {
+              return;
+            }
+
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              labels: labelsToAdd
+            });
+
+      - name: Auto-label pull requests by content and files
+        if: ${{ github.event_name == 'pull_request' }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number
+            });
+
+            const text = `${pr.title}\n${pr.body || ''}`.toLowerCase();
+            const existing = new Set(pr.labels.map(label => label.name));
+            const add = new Set(['ELUSOC']);
+
+            const containsAny = (keywords) => keywords.some(keyword => text.includes(keyword));
+
+            if (containsAny(['bug', 'fix', 'crash', 'error', 'regression', 'fails', 'failure'])) {
+              add.add('bug');
+            }
+            if (containsAny(['feature', 'enhancement', 'request', 'improve', 'add', 'proposal'])) {
+              add.add('enhancement');
+            }
+            if (containsAny(['docs', 'documentation', 'readme', 'guide', 'typo', 'spelling'])) {
+              add.add('documentation');
+            }
+            if (containsAny(['test', 'testing', 'unit test', 'integration', 'e2e'])) {
+              add.add('testing');
+            }
+            if (containsAny(['ui', 'ux', 'user interface', 'layout', 'design', 'style', 'css', 'visual'])) {
+              add.add('ui/ux');
+            }
+            if (containsAny(['security', 'vulnerability', 'cve', 'xss', 'csrf', 'auth', 'authentication', 'authorization', 'leak'])) {
+              add.add('security');
+            }
+            if (containsAny(['performance', 'slow', 'latency', 'optimize', 'throughput', 'memory', 'cpu'])) {
+              add.add('performance');
+            }
+
+            const files = [];
+            for await (const response of github.paginate.iterator(
+              github.rest.pulls.listFiles,
+              { owner: context.repo.owner, repo: context.repo.repo, pull_number: context.issue.number, per_page: 100 }
+            )) {
+              for (const file of response.data) {
+                files.push(file.filename);
+              }
+            }
+
+            const fileMatches = (patterns) => files.some(file => patterns.some(pattern => file.includes(pattern)));
+            const matchesRegex = (regexes) => files.some(file => regexes.some(regex => regex.test(file)));
+
+            if (fileMatches(['src/', 'index.tsx', 'index.css', 'index.html'])) {
+              add.add('frontend');
+            }
+            if (fileMatches(['README.md', 'FUTURE_ROADMAP.md', '.github/'])) {
+              add.add('documentation');
+            }
+            if (fileMatches(['api/', 'server/', 'backend/', 'services/']) && !fileMatches(['src/services/'])) {
+              add.add('backend');
+            }
+            if (matchesRegex([/\btest\b/i, /__tests__/, /\.spec\./, /\.test\./])) {
+              add.add('testing');
+            }
+
+            const labelsToAdd = [...add].filter(label => !existing.has(label));
+            if (labelsToAdd.length === 0) {
+              return;
+            }
+
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              labels: labelsToAdd
+            });

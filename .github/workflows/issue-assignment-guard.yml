@@ -1,0 +1,112 @@
+name: Issue Assignment Guard
+
+on:
+  schedule:
+    - cron: '0 * * * *'
+  issues:
+    types: [assigned, unassigned, reopened]
+  workflow_dispatch:
+
+permissions:
+  issues: write
+
+jobs:
+  assignment-guard:
+    name: Manage assigned issue inactivity
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check assigned issue inactivity
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const reminderMarker = '<!-- elusoc-assignment-reminder -->';
+            const unassignMarker = '<!-- elusoc-assignment-unassigned -->';
+            const now = Date.now();
+
+            const issues = [];
+            for await (const response of github.paginate.iterator(
+              github.rest.search.issuesAndPullRequests,
+              { q: `repo:${owner}/${repo} is:issue is:open assignee:*`, per_page: 100 }
+            )) {
+              issues.push(...response.data);
+            }
+
+            for (const item of issues) {
+              const issueNumber = item.number;
+              const assignees = item.assignees || [];
+              if (assignees.length === 0) {
+                continue;
+              }
+
+              const { data: comments } = await github.rest.issues.listComments({
+                owner,
+                repo,
+                issue_number: issueNumber,
+                per_page: 100
+              });
+
+              const { data: events } = await github.rest.issues.listEventsForTimeline({
+                owner,
+                repo,
+                issue_number: issueNumber,
+                per_page: 100,
+                mediaType: { previews: ['mockingbird'] }
+              });
+
+              const assignedEvents = events.filter(event => event.event === 'assigned');
+              const latestAssignedAt = assignedEvents.length > 0
+                ? new Date(assignedEvents[assignedEvents.length - 1].created_at).getTime()
+                : new Date(item.created_at).getTime();
+
+              const humanComments = comments.filter(comment => {
+                const isBot = comment.user && comment.user.type === 'Bot';
+                const isAutomation = comment.body.includes(reminderMarker) || comment.body.includes(unassignMarker);
+                return !isBot && !isAutomation;
+              });
+
+              const latestHumanCommentAt = humanComments.length > 0
+                ? Math.max(...humanComments.map(comment => new Date(comment.created_at).getTime()))
+                : 0;
+
+              const lastActivityAt = Math.max(latestAssignedAt, latestHumanCommentAt || 0);
+              const hoursIdle = (now - lastActivityAt) / 36e5;
+
+              const reminderPosted = comments.some(comment =>
+                comment.body.includes(reminderMarker) && new Date(comment.created_at).getTime() > latestAssignedAt
+              );
+              const unassignPosted = comments.some(comment =>
+                comment.body.includes(unassignMarker) && new Date(comment.created_at).getTime() > latestAssignedAt
+              );
+
+              if (hoursIdle >= 24 && !unassignPosted) {
+                const assigneeLogins = assignees.map(assignee => assignee.login);
+                await github.rest.issues.removeAssignees({
+                  owner,
+                  repo,
+                  issue_number: issueNumber,
+                  assignees: assigneeLogins
+                });
+
+                const body = `${unassignMarker}\nRemoving assignee(s) due to 24 hours of inactivity. The issue remains open so someone else can pick it up. If you are still working on this, feel free to reassign yourself and post an update.`;
+                await github.rest.issues.createComment({
+                  owner,
+                  repo,
+                  issue_number: issueNumber,
+                  body
+                });
+                continue;
+              }
+
+              if (hoursIdle >= 20 && hoursIdle < 24 && !reminderPosted) {
+                const mentions = assignees.map(assignee => `@${assignee.login}`).join(' ');
+                const body = `${reminderMarker}\nFriendly reminder ${mentions}: there has been no activity for 20 hours. Please share a quick update or unassign yourself if you are no longer working on this.`;
+                await github.rest.issues.createComment({
+                  owner,
+                  repo,
+                  issue_number: issueNumber,
+                  body
+                });
+              }
+            }

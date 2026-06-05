@@ -1,0 +1,49 @@
+labels:
+  - name: ELUSOC
+    color: 0E8A16
+    description: ELUSOC Community Contribution
+  - name: bug
+    color: D73A4A
+    description: Something is not working
+  - name: enhancement
+    color: A2EEEF
+    description: New feature or improvement
+  - name: documentation
+    color: 0075CA
+    description: Documentation updates
+  - name: testing
+    color: BFDADC
+    description: Testing related work
+  - name: ui/ux
+    color: F9D0C4
+    description: User interface and experience
+  - name: frontend
+    color: C2E0C6
+    description: Frontend changes
+  - name: backend
+    color: F4C6E7
+    description: Backend changes
+  - name: security
+    color: B60205
+    description: Security related issues
+  - name: performance
+    color: FBCA04
+    description: Performance improvements
+  - name: question
+    color: D876E3
+    description: Questions and support
+  - name: duplicate
+    color: CFD3D7
+    description: Duplicate issue or PR
+  - name: good first issue
+    color: 7057FF
+    description: Good for newcomers
+  - name: stale
+    color: EDEDED
+    description: Inactive for too long
+  - name: hacktoberfest
+    color: FF8C00
+    description: Hacktoberfest participation
+  - name: gssoc
+    color: 5319E7
+    description: GSSoC participation

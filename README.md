@@ -74,6 +74,19 @@ NAPATA/
 4.  **Generate**: Click "Generate Website" to watch the AI build your site in seconds.
 5.  **Refine**: Use the modification prompt to ask for changes (e.g., "Make the hero section darker").
 
+## 🤝 Contributing
+
+We welcome ELUSOC contributors. Please read the contribution guide before opening
+issues or pull requests:
+
+- [CONTRIBUTING.md](CONTRIBUTING.md)
+
+## 🔐 Security
+
+Please review the security policy for reporting vulnerabilities:
+
+- [SECURITY.md](SECURITY.md)
+
 ## 📄 License
 
 This project is licensed under the MIT License.
