@@ -1,0 +1,145 @@
+name: Manual Issue Label Cleanup
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  label-unlabeled-issues:
+    name: Label historical unlabeled issues
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Scan and label open issues
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+
+            const repoLabels = new Set();
+            for await (const response of github.paginate.iterator(
+              github.rest.issues.listLabelsForRepo,
+              { owner, repo, per_page: 100 }
+            )) {
+              for (const label of response.data) {
+                repoLabels.add(label.name);
+              }
+            }
+
+            const labelDefinitions = [
+              { name: 'bug', keywords: ['bug', 'crash', 'error', 'exception', 'broken', 'regression', 'fails', 'failure', 'not working', 'does not work', 'cannot', "can't"] },
+              { name: 'enhancement', keywords: ['feature', 'enhancement', 'request', 'improve', 'proposal', 'suggestion', 'add support', 'would like'] },
+              { name: 'documentation', keywords: ['docs', 'documentation', 'readme', 'guide', 'typo', 'spelling', 'wording'] },
+              { name: 'frontend', keywords: ['frontend', 'client', 'browser', 'react', 'component', 'ui component', 'html', 'css', 'vite'] },
+              { name: 'backend', keywords: ['backend', 'server', 'api', 'database', 'db', 'service', 'endpoint', 'controller', 'middleware'] },
+              { name: 'ui/ux', keywords: ['ui', 'ux', 'user interface', 'layout', 'design', 'style', 'visual', 'accessibility', 'a11y'] },
+              { name: 'testing', keywords: ['test', 'testing', 'unit test', 'integration', 'e2e', 'coverage', 'mock', 'vitest', 'jest'] },
+              { name: 'security', keywords: ['security', 'vulnerability', 'cve', 'xss', 'csrf', 'auth', 'authentication', 'authorization', 'exploit', 'leak'] },
+              { name: 'performance', keywords: ['performance', 'slow', 'latency', 'optimize', 'optimization', 'throughput', 'memory', 'cpu', 'lag'] },
+              { name: 'question', keywords: ['question', 'how do', 'help', 'support', 'clarify', 'usage', 'can someone', 'what does'] },
+              { name: 'good first issue', keywords: ['good first issue', 'beginner', 'starter', 'easy', 'first timers', 'newcomer'] }
+            ];
+
+            const stats = {
+              issuesScanned: 0,
+              unlabeledIssuesFound: 0,
+              issuesLabeled: 0,
+              issuesSkipped: 0,
+              labelsApplied: {}
+            };
+
+            const applyLabelCount = (labelName) => {
+              stats.labelsApplied[labelName] = (stats.labelsApplied[labelName] || 0) + 1;
+            };
+
+            const normalizeText = (issue) => `${issue.title}\n${issue.body || ''}`.toLowerCase();
+
+            const detectLabels = (text) => {
+              const matched = [];
+
+              for (const definition of labelDefinitions) {
+                const matchedKeyword = definition.keywords.some((keyword) => text.includes(keyword));
+                if (matchedKeyword && repoLabels.has(definition.name)) {
+                  matched.push(definition.name);
+                }
+              }
+
+              if (matched.length === 0 && repoLabels.has('ELUSOC')) {
+                matched.push('ELUSOC');
+              }
+
+              return matched;
+            };
+
+            const issues = [];
+            for await (const response of github.paginate.iterator(
+              github.rest.issues.listForRepo,
+              { owner, repo, state: 'open', per_page: 100 }
+            )) {
+              for (const item of response.data) {
+                if (item.pull_request) {
+                  continue;
+                }
+
+                issues.push(item);
+              }
+            }
+
+            for (const issue of issues) {
+              stats.issuesScanned += 1;
+
+              const existingLabels = Array.isArray(issue.labels) ? issue.labels : [];
+              if (existingLabels.length > 0) {
+                stats.issuesSkipped += 1;
+                core.info(`Skipping #${issue.number} because it already has labels: ${existingLabels.map((label) => label.name).join(', ')}`);
+                continue;
+              }
+
+              stats.unlabeledIssuesFound += 1;
+
+              const text = normalizeText(issue);
+              const labelsToApply = detectLabels(text);
+
+              if (labelsToApply.length === 0) {
+                stats.issuesSkipped += 1;
+                core.info(`Skipping #${issue.number} because no labels were available to apply.`);
+                continue;
+              }
+
+              await github.rest.issues.addLabels({
+                owner,
+                repo,
+                issue_number: issue.number,
+                labels: labelsToApply
+              });
+
+              stats.issuesLabeled += 1;
+              for (const labelName of labelsToApply) {
+                applyLabelCount(labelName);
+              }
+
+              core.info(`Labeled #${issue.number} with: ${labelsToApply.join(', ')}`);
+            }
+
+            core.info(`Total issues scanned: ${stats.issuesScanned}`);
+            core.info(`Unlabeled issues found: ${stats.unlabeledIssuesFound}`);
+            core.info(`Issues labeled: ${stats.issuesLabeled}`);
+            core.info(`Issues skipped: ${stats.issuesSkipped}`);
+            core.info(`Labels applied: ${JSON.stringify(stats.labelsApplied, null, 2)}`);
+
+            await core.summary
+              .addHeading('Manual Issue Label Cleanup')
+              .addTable([
+                [{ data: 'Metric', header: true }, { data: 'Value', header: true }],
+                ['Total issues scanned', String(stats.issuesScanned)],
+                ['Unlabeled issues found', String(stats.unlabeledIssuesFound)],
+                ['Issues labeled', String(stats.issuesLabeled)],
+                ['Issues skipped', String(stats.issuesSkipped)]
+              ])
+              .addHeading('Labels Applied')
+              .addCodeBlock(JSON.stringify(stats.labelsApplied, null, 2), 'json')
+              .write();
