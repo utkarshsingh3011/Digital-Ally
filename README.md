@@ -67,11 +67,10 @@ NAPATA/
 ```
 
 ## 🧩 Architectural diagram
-<img width="1684" height="1022" alt="arch drawio (1)" src="https://github.com/user-attachments/assets/31d4393c-daeb-4be0-98f2-892fbc8684a3" />
+<img width="8192" height="1783" alt="arch" src="https://github.com/user-attachments/assets/39777d99-e887-4785-9cd3-036b48e1dbea" />
 
 ## 🔀 Data flow diagram
-<img width="1712" height="2176" alt="df drawio" src="https://github.com/user-attachments/assets/7e79211d-c884-460a-813a-6a7ce73fbc9c" />
-
+<img width="6818" height="8192" alt="DFD-2026-06-06-051046" src="https://github.com/user-attachments/assets/8834b79b-d627-4a70-9c19-5efe69f842e2" />
 
 ## 💡 Usage
 
