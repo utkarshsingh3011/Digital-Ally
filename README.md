@@ -66,6 +66,11 @@ NAPATA/
 └── vite.config.ts      # Vite configuration
 ```
 
+## 🧩 Architectural diagram
+<img width="1684" height="1022" alt="arch drawio (1)" src="https://github.com/user-attachments/assets/31d4393c-daeb-4be0-98f2-892fbc8684a3" />
+
+
+
 ## 💡 Usage
 
 1.  **Enter Business Details**: Provide your name, business name, and contact info.
