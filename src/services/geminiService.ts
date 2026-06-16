@@ -1,16 +1,4 @@
-
-
-import { GoogleGenAI } from "@google/genai";
 import { PROMPT_TEMPLATE, NEWSLETTER_PROMPT_TEMPLATE, DASHBOARD_ANALYSIS_PROMPT_TEMPLATE, LANGUAGES } from '../constants';
-
-const API_KEY = process.env.API_KEY;
-
-if (!API_KEY) {
-  throw new Error("API_KEY environment variable not set.");
-}
-
-const ai = new GoogleGenAI({ apiKey: API_KEY });
-const model = "gemini-2.5-flash";
 
 interface WebsiteParams {
     description: string;
@@ -43,10 +31,31 @@ const cleanResponse = (text: string): string => {
     return cleanedText;
 }
 
+async function callProxy(endpoint: string, body: any) {
+    const token = typeof window !== 'undefined' ? localStorage.getItem('sessionToken') : null;
+    const headers: Record<string,string> = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
+    const res = await fetch(endpoint, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+    });
+
+    if (res.status === 401) throw new Error('Unauthorized: server requires authentication.');
+    if (res.status === 429) throw new Error('Rate limit exceeded.');
+    if (!res.ok) {
+        const err = await res.text();
+        throw new Error(`Server error: ${err}`);
+    }
+
+    const data = await res.json();
+    return data;
+}
+
 export async function generateWebsite(
     { description, userName, businessName, userEmail, userPhone, paletteName, paletteDetails, modificationPrompt }: WebsiteParams
 ): Promise<string> {
-  try {
     const modificationSection = modificationPrompt
       ? `\n**Modification Request:** "${modificationPrompt}"`
       : '';
@@ -61,84 +70,30 @@ export async function generateWebsite(
         .replace('{PALETTE_DETAILS}', paletteDetails)
         .replace('{MODIFICATION_SECTION}', modificationSection);
 
-    const websiteResponse = await ai.models.generateContent({
-      model: model,
-      contents: textPrompt,
-       config: {
-        temperature: 0.7, 
-        topP: 0.95,
-        thinkingConfig: { thinkingBudget: 0 },
-      },
-    });
-
-    const generatedHtml = cleanResponse(websiteResponse.text);
-    return generatedHtml;
-
-  } catch (error) {
-    console.error("Error during website generation process:", error);
-    if (error instanceof Error) {
-        if (error.message.includes('400')) {
-            throw new Error('The generated prompt is too large. Please try a shorter description.');
-        }
-        throw new Error(`Gemini API Error: ${error.message}`);
-    }
-    throw new Error("An unknown error occurred while communicating with the Gemini API.");
-  }
+    const data = await callProxy('/api/generate/website', { prompt: textPrompt });
+    return cleanResponse(data.html || data.text || '');
 }
 
 export async function generateNewsletter(
     { description, businessName }: NewsletterParams
 ): Promise<string> {
-    try {
-        const finalPrompt = NEWSLETTER_PROMPT_TEMPLATE
-            .replace('{BUSINESS_NAME}', businessName)
-            .replace('{USER_INPUT}', description);
+    const finalPrompt = NEWSLETTER_PROMPT_TEMPLATE
+        .replace('{BUSINESS_NAME}', businessName)
+        .replace('{USER_INPUT}', description);
 
-        const newsletterResponse = await ai.models.generateContent({
-            model: model,
-            contents: finalPrompt,
-            config: {
-                temperature: 0.8,
-                topP: 0.95,
-            }
-        });
-
-        return cleanResponse(newsletterResponse.text);
-
-    } catch(error) {
-        console.error("Error during newsletter generation:", error);
-        if (error instanceof Error) {
-            throw new Error(`Gemini API Error: ${error.message}`);
-        }
-        throw new Error("An unknown error occurred while generating the newsletter.");
-    }
+    const data = await callProxy('/api/generate/newsletter', { prompt: finalPrompt });
+    return cleanResponse(data.html || data.text || '');
 }
 
 export async function analyzeAndTranslateDashboard(
     { dashboardData, language }: DashboardAnalysisParams
 ): Promise<string> {
-    try {
-        const langDetails = LANGUAGES.find(l => l.value === language) || LANGUAGES[0];
-        const finalPrompt = DASHBOARD_ANALYSIS_PROMPT_TEMPLATE
-            .replace('{DASHBOARD_DATA}', dashboardData)
-            .replace('{LANGUAGE_NAME}', langDetails.label)
-            .replace('{LANGUAGE_CODE}', langDetails.value);
+    const langDetails = LANGUAGES.find(l => l.value === language) || LANGUAGES[0];
+    const finalPrompt = DASHBOARD_ANALYSIS_PROMPT_TEMPLATE
+        .replace('{DASHBOARD_DATA}', dashboardData)
+        .replace('{LANGUAGE_NAME}', langDetails.label)
+        .replace('{LANGUAGE_CODE}', langDetails.value);
 
-        const analysisResponse = await ai.models.generateContent({
-            model: model,
-            contents: finalPrompt,
-            config: {
-                temperature: 0.5,
-            }
-        });
-        
-        return cleanResponse(analysisResponse.text);
-
-    } catch (error) {
-        console.error("Error during dashboard analysis:", error);
-        if (error instanceof Error) {
-            throw new Error(`Gemini API Error: ${error.message}`);
-        }
-        throw new Error("An unknown error occurred while analyzing the dashboard.");
-    }
+    const data = await callProxy('/api/generate/analysis', { prompt: finalPrompt });
+    return cleanResponse(data.html || data.text || '');
 }
