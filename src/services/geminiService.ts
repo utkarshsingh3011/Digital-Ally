@@ -61,7 +61,13 @@ async function callProxy(endpoint: string, body: any) {
     });
 
     if (res.status === 401) throw new Error('Unauthorized: server requires authentication.');
-    if (res.status === 429) throw new Error('Rate limit exceeded.');
+    
+    if (res.status === 429) {
+        const retryAfter = res.headers.get('Retry-After');
+        const errorMsg = `RATE_LIMIT_429|${retryAfter || '900'}`;
+        throw new Error(errorMsg);
+    }
+    
     if (!res.ok) {
         const err = await res.text();
         throw new Error(`Server error: ${err}`);
