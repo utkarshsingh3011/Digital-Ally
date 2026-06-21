@@ -5,6 +5,7 @@ import helmet from 'helmet';
 import dotenv from 'dotenv';
 import { GoogleGenAI } from '@google/genai';
 import Redis from 'ioredis';
+import cron from 'node-cron';
 import { createLogger } from './logger.js';
 
 dotenv.config();
@@ -45,6 +46,23 @@ redis.on('error', (err) => {
 redis.on('connect', () => {
   console.log('Connected to Redis for quota tracking');
 });
+
+// Schedule a midnight UTC job to clear yesterday's daily counters
+cron.schedule('0 0 * * *', async () => {
+  try {
+    const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().split('T')[0]; // YYYY-MM-DD
+    const pattern = `quota:daily:*:${yesterday}`;
+    const keys = await redis.keys(pattern);
+    if (keys && keys.length) {
+      await redis.del(...keys);
+      console.log(`Cleared ${keys.length} daily quota keys for ${yesterday}`);
+    } else {
+      console.log(`No daily quota keys to clear for ${yesterday}`);
+    }
+  } catch (err) {
+    console.error('Error during scheduled daily quota reset:', err);
+  }
+}, { timezone: 'UTC' });
 
 // In-memory request logging and error tracking
 const MAX_LOG_ENTRIES = 1000;
@@ -427,6 +445,45 @@ app.post('/api/generate/analysis', generateLimiter, generateLogger, async (req, 
 });
 
 app.get('/api/health', (req, res) => res.json({ ok: true, redis: redis.status }));
+
+// Usage endpoint: returns usage for provided X-Client-ID (must be valid UUID)
+app.get('/api/usage', async (req, res) => {
+  try {
+    const clientId = req.get('X-Client-ID');
+    if (!clientId || !isValidUUID(clientId)) {
+      return res.status(400).json({ error: 'Missing or invalid X-Client-ID header' });
+    }
+
+    if (redis.status !== 'ready') {
+      console.warn('Redis not ready when fetching usage');
+      return res.status(503).json({ error: 'Quota service unavailable' });
+    }
+
+    const today = new Date().toISOString().split('T')[0];
+    const monthKey = new Date().toISOString().slice(0, 7);
+
+    const dailyKey = `quota:daily:${clientId}:${today}`;
+    const monthlyKey = `quota:monthly:${clientId}:${monthKey}`;
+
+    const [dailyVal, monthlyVal] = await Promise.all([
+      redis.get(dailyKey),
+      redis.get(monthlyKey),
+    ]);
+
+    const requestsToday = parseInt(dailyVal || '0', 10);
+    const monthlyUsage = parseInt(monthlyVal || '0', 10);
+
+    return res.json({
+      requestsToday,
+      dailyCap: DAILY_QUOTA,
+      monthlyUsage,
+      monthlyCap: MONTHLY_QUOTA,
+    });
+  } catch (err) {
+    console.error('Error in /api/usage', err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+});
 
 // Admin endpoint to retrieve request logs and blocked IPs (no auth for monitoring)
 app.get('/api/logs', (req, res) => {
