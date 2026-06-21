@@ -5,6 +5,7 @@ import helmet from 'helmet';
 import dotenv from 'dotenv';
 import { GoogleGenAI } from '@google/genai';
 import Redis from 'ioredis';
+import { createLogger } from './logger.js';
 
 dotenv.config();
 
@@ -192,6 +193,9 @@ const generateLimiter = rateLimit({
   },
 });
 
+// Structured JSON logger for /api/generate/* routes
+const generateLogger = createLogger();
+
 // Redis quota tracking middleware for daily and monthly limits per IP
 const DAILY_QUOTA = parseInt(process.env.DAILY_QUOTA || '100', 10);
 const MONTHLY_QUOTA = parseInt(process.env.MONTHLY_QUOTA || '1000', 10);
@@ -325,7 +329,7 @@ function hasSpamPatterns(str) {
   return false;
 }
 
-app.post('/api/generate/website', generateLimiter, requireAuth, async (req, res) => {
+app.post('/api/generate/website', generateLimiter, generateLogger, requireAuth, async (req, res) => {
   try {
     const { prompt, outputFormat = 'html' } = req.body; // Default to 'html'
     
@@ -389,7 +393,7 @@ app.post('/api/generate/website', generateLimiter, requireAuth, async (req, res)
     return res.status(500).json({ error: 'Server error' });
   }
 });
-app.post('/api/generate/newsletter', generateLimiter, requireAuth, async (req, res) => {
+app.post('/api/generate/newsletter', generateLimiter, generateLogger, requireAuth, async (req, res) => {
   try {
     const { prompt } = req.body;
     if (!prompt || typeof prompt !== 'string' || prompt.length > 8000) {
@@ -404,7 +408,7 @@ app.post('/api/generate/newsletter', generateLimiter, requireAuth, async (req, r
   }
 });
 
-app.post('/api/generate/analysis', generateLimiter, requireAuth, async (req, res) => {
+app.post('/api/generate/analysis', generateLimiter, generateLogger, requireAuth, async (req, res) => {
   try {
     const { prompt } = req.body;
     if (!prompt || typeof prompt !== 'string' || prompt.length > 15000) {
