@@ -102,8 +102,13 @@ function isIPBlocked(ip) {
 
 // Middleware to check if IP is blocked
 function checkIPBlocklist(req, res, next) {
-  const clientIp = req.ip || req.connection.remoteAddress || 'unknown';
-  if (isIPBlocked(clientIp)) {
+  // Prioritize X-Client-ID header, fall back to IP
+  let clientIdentifier = req.get('X-Client-ID');
+  if (!clientIdentifier || !isValidUUID(clientIdentifier)) {
+    clientIdentifier = req.ip || req.connection.remoteAddress || 'unknown';
+  }
+
+  if (isIPBlocked(clientIdentifier)) {
     return res.status(403).json({ error: 'IP address blocked due to excessive errors' });
   }
   next();
@@ -111,7 +116,12 @@ function checkIPBlocklist(req, res, next) {
 
 // Middleware to log requests and track errors
 function requestLogger(req, res, next) {
-  const clientIp = req.ip || req.connection.remoteAddress || 'unknown';
+  // Prioritize X-Client-ID header, fall back to IP
+  let clientIdentifier = req.get('X-Client-ID');
+  if (!clientIdentifier || !isValidUUID(clientIdentifier)) {
+    clientIdentifier = req.ip || req.connection.remoteAddress || 'unknown';
+  }
+
   const endpoint = req.path;
   const timestamp = new Date().toISOString();
   
@@ -120,7 +130,7 @@ function requestLogger(req, res, next) {
 
   // Log the request
   addToLog({
-    ip: clientIp,
+    ip: clientIdentifier,
     endpoint,
     timestamp,
     promptLength,
@@ -133,7 +143,7 @@ function requestLogger(req, res, next) {
     
     // Track 4xx and 5xx errors (excluding 429 rate limit)
     if ((statusCode >= 400 && statusCode < 600) && statusCode !== 429) {
-      trackError(clientIp);
+      trackError(clientIdentifier);
     }
 
     return originalJson.call(this, data);
@@ -148,6 +158,13 @@ app.use(requestLogger);
 app.use(helmet());
 app.use(cors());
 app.use(express.json({ limit: '128kb' }));
+
+// UUID validation regex (RFC 4122)
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function isValidUUID(str) {
+  return UUID_REGEX.test(str);
+}
 
 // Basic rate limiting per IP to mitigate abuse
 const limiter = rateLimit({
@@ -183,12 +200,17 @@ const MONTHLY_TTL = 30 * 24 * 60 * 60; // 30 days in seconds
 
 async function quotaMiddleware(req, res, next) {
   try {
-    const clientIp = req.ip || req.connection.remoteAddress || 'unknown';
+    // Prioritize X-Client-ID header (session fingerprint), fall back to IP
+    let quotaKey = req.get('X-Client-ID');
+    if (!quotaKey || !isValidUUID(quotaKey)) {
+      quotaKey = req.ip || req.connection.remoteAddress || 'unknown';
+    }
+
     const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
     const monthKey = new Date().toISOString().slice(0, 7); // YYYY-MM
 
-    const dailyKey = `quota:daily:${clientIp}:${today}`;
-    const monthlyKey = `quota:monthly:${clientIp}:${monthKey}`;
+    const dailyKey = `quota:daily:${quotaKey}:${today}`;
+    const monthlyKey = `quota:monthly:${quotaKey}:${monthKey}`;
 
     // Check if Redis is connected
     if (redis.status !== 'ready') {
@@ -245,7 +267,7 @@ async function quotaMiddleware(req, res, next) {
     req.quotaInfo = {
       daily: { used: dailyIncr, limit: DAILY_QUOTA },
       monthly: { used: monthlyIncr, limit: MONTHLY_QUOTA },
-      ip: clientIp,
+      quotaKey: quotaKey,
     };
 
     next();

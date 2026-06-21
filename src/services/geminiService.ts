@@ -21,6 +21,21 @@ interface DashboardAnalysisParams {
     language: string;
 }
 
+const CLIENT_ID_KEY = 'x-client-id';
+
+// Generate or retrieve session fingerprint
+function getOrCreateClientID(): string {
+    if (typeof window === 'undefined') return '';
+    
+    const stored = sessionStorage.getItem(CLIENT_ID_KEY);
+    if (stored) return stored;
+
+    // Generate new UUID for this session
+    const clientID = crypto.randomUUID();
+    sessionStorage.setItem(CLIENT_ID_KEY, clientID);
+    return clientID;
+}
+
 const cleanResponse = (text: string): string => {
     let cleanedText = text.trim();
     if (cleanedText.startsWith('```html')) {
@@ -33,8 +48,11 @@ const cleanResponse = (text: string): string => {
 
 async function callProxy(endpoint: string, body: any) {
     const token = typeof window !== 'undefined' ? localStorage.getItem('sessionToken') : null;
+    const clientID = getOrCreateClientID();
+    
     const headers: Record<string,string> = { 'Content-Type': 'application/json' };
     if (token) headers['Authorization'] = `Bearer ${token}`;
+    if (clientID) headers['X-Client-ID'] = clientID;
 
     const res = await fetch(endpoint, {
         method: 'POST',
