@@ -4,6 +4,7 @@ import rateLimit from 'express-rate-limit';
 import helmet from 'helmet';
 import dotenv from 'dotenv';
 import { GoogleGenAI } from '@google/genai';
+import Redis from 'ioredis';
 
 dotenv.config();
 
@@ -23,6 +24,27 @@ if (!SERVER_CLIENT_TOKEN) {
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 const MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 
+// Initialize Redis client for quota tracking
+const redis = new Redis({
+  host: process.env.REDIS_HOST || 'localhost',
+  port: process.env.REDIS_PORT || 6379,
+  retryStrategy: (times) => {
+    const delay = Math.min(times * 50, 2000);
+    return delay;
+  },
+  enableReadyCheck: false,
+  maxRetriesPerRequest: null,
+});
+
+redis.on('error', (err) => {
+  console.warn('Redis connection error:', err.message);
+  console.warn('Rate limiting quotas will be unavailable.');
+});
+
+redis.on('connect', () => {
+  console.log('Connected to Redis for quota tracking');
+});
+
 app.use(helmet());
 app.use(cors());
 app.use(express.json({ limit: '128kb' }));
@@ -35,6 +57,89 @@ const limiter = rateLimit({
   legacyHeaders: false,
 });
 app.use('/api/', limiter);
+
+// Redis quota tracking middleware for daily and monthly limits per IP
+const DAILY_QUOTA = parseInt(process.env.DAILY_QUOTA || '100', 10);
+const MONTHLY_QUOTA = parseInt(process.env.MONTHLY_QUOTA || '1000', 10);
+const DAILY_TTL = 86400; // 24 hours in seconds
+const MONTHLY_TTL = 30 * 24 * 60 * 60; // 30 days in seconds
+
+async function quotaMiddleware(req, res, next) {
+  try {
+    const clientIp = req.ip || req.connection.remoteAddress || 'unknown';
+    const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+    const monthKey = new Date().toISOString().slice(0, 7); // YYYY-MM
+
+    const dailyKey = `quota:daily:${clientIp}:${today}`;
+    const monthlyKey = `quota:monthly:${clientIp}:${monthKey}`;
+
+    // Check if Redis is connected
+    if (redis.status !== 'ready') {
+      console.warn('Redis not ready, skipping quota check');
+      return next();
+    }
+
+    // Use pipeline for atomic operations
+    const pipeline = redis.pipeline();
+    pipeline.incr(dailyKey);
+    pipeline.expire(dailyKey, DAILY_TTL);
+    pipeline.incr(monthlyKey);
+    pipeline.expire(monthlyKey, MONTHLY_TTL);
+
+    const results = await pipeline.exec();
+    
+    if (!results) {
+      console.warn('Redis pipeline failed');
+      return next();
+    }
+
+    const [dailyIncr] = results[0];
+    const [monthlyIncr] = results[2];
+
+    // Check daily quota
+    if (dailyIncr > DAILY_QUOTA) {
+      const retryAfter = DAILY_TTL;
+      return res
+        .status(429)
+        .set('Retry-After', retryAfter.toString())
+        .json({
+          error: 'Daily quota exceeded',
+          quotaLimit: DAILY_QUOTA,
+          quotaUsed: dailyIncr,
+          retryAfter: retryAfter,
+        });
+    }
+
+    // Check monthly quota
+    if (monthlyIncr > MONTHLY_QUOTA) {
+      const retryAfter = MONTHLY_TTL;
+      return res
+        .status(429)
+        .set('Retry-After', retryAfter.toString())
+        .json({
+          error: 'Monthly quota exceeded',
+          quotaLimit: MONTHLY_QUOTA,
+          quotaUsed: monthlyIncr,
+          retryAfter: retryAfter,
+        });
+    }
+
+    // Attach quota info to request for logging
+    req.quotaInfo = {
+      daily: { used: dailyIncr, limit: DAILY_QUOTA },
+      monthly: { used: monthlyIncr, limit: MONTHLY_QUOTA },
+      ip: clientIp,
+    };
+
+    next();
+  } catch (error) {
+    console.error('Error in quota middleware:', error);
+    // On error, allow the request to proceed (fail open)
+    next();
+  }
+}
+
+app.use('/api/', quotaMiddleware);
 
 // Simple auth middleware: require a bearer token that matches SERVER_CLIENT_TOKEN
 function requireAuth(req, res, next) {
@@ -138,8 +243,25 @@ app.post('/api/generate/analysis', requireAuth, async (req, res) => {
   }
 });
 
-app.get('/api/health', (req, res) => res.json({ ok: true }));
+app.get('/api/health', (req, res) => res.json({ ok: true, redis: redis.status }));
 
 app.listen(PORT, () => {
   console.log(`AI proxy server listening on port ${PORT}`);
+});
+
+// Graceful shutdown
+process.on('SIGTERM', async () => {
+  console.log('SIGTERM received, shutting down gracefully...');
+  if (redis && redis.status === 'ready') {
+    await redis.quit();
+  }
+  process.exit(0);
+});
+
+process.on('SIGINT', async () => {
+  console.log('SIGINT received, shutting down gracefully...');
+  if (redis && redis.status === 'ready') {
+    await redis.quit();
+  }
+  process.exit(0);
 });
