@@ -27,6 +27,8 @@ if (!SERVER_CLIENT_TOKEN) {
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 const MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 const CONSENT_VERSION = process.env.AI_CONSENT_VERSION || '2026-06-21';
+const API_VERSION = 'v1';
+const API_DEPRECATION_SUNSET = 'Wed, 31 Dec 2026 23:59:59 GMT';
 
 // Initialize Redis client for quota tracking
 const redis = new Redis({
@@ -179,7 +181,7 @@ app.use(requestLogger);
 app.use(helmet());
 app.use(cors());
 app.use(express.json({ limit: '128kb' }));
-app.use('/api/generate/', (req, res, next) => {
+app.use(['/api/generate/', `/api/${API_VERSION}/generate/`], (req, res, next) => {
   res.set('Cache-Control', 'no-store, max-age=0');
   res.set('Pragma', 'no-cache');
   next();
@@ -201,8 +203,26 @@ const limiter = rateLimit({
 });
 app.use('/api/', limiter);
 
-// Apply auth requirement globally to /api/generate/* routes BEFORE rate limiting
-app.use('/api/generate/', requireAuth);
+function setApiVersionHeader(req, res, next) {
+  res.set('API-Version', API_VERSION);
+  next();
+}
+
+function setDeprecatedApiHeaders(successorPath) {
+  return (req, res, next) => {
+    res.set('API-Version', API_VERSION);
+    res.set('Deprecation', 'true');
+    res.set('Sunset', API_DEPRECATION_SUNSET);
+    res.set('Link', `<${successorPath}>; rel="successor-version"`);
+    next();
+  };
+}
+
+app.use(`/api/${API_VERSION}`, setApiVersionHeader);
+app.use(['/api/generate/', '/api/health', '/api/usage', '/api/logs'], setDeprecatedApiHeaders(`/api/${API_VERSION}`));
+
+// Apply auth requirement globally to /api/generate/* routes BEFORE route handlers
+app.use(['/api/generate/', `/api/${API_VERSION}/generate/`], requireAuth);
 
 // Stricter rate limiting for /api/generate/* routes
 const generateLimiter = rateLimit({
@@ -364,7 +384,7 @@ function hasSpamPatterns(str) {
   return false;
 }
 
-app.post('/api/generate/website', generateLimiter, generateLogger, async (req, res) => {
+async function handleWebsiteGeneration(req, res) {
   try {
     const { prompt, outputFormat = 'html' } = req.body; // Default to 'html'
     
@@ -427,8 +447,9 @@ app.post('/api/generate/website', generateLimiter, generateLogger, async (req, r
     console.error('Website generation failed');
     return res.status(500).json({ error: 'Server error' });
   }
-});
-app.post('/api/generate/newsletter', requireAuth, requireAiConsent, async (req, res) => {
+}
+
+async function handleNewsletterGeneration(req, res) {
   try {
     const { prompt } = req.body;
     if (!prompt || typeof prompt !== 'string' || prompt.length > 8000) {
@@ -441,9 +462,9 @@ app.post('/api/generate/newsletter', requireAuth, requireAiConsent, async (req, 
     console.error('Newsletter generation failed');
     return res.status(500).json({ error: 'Server error' });
   }
-});
+}
 
-app.post('/api/generate/analysis', requireAuth, requireAiConsent, async (req, res) => {
+async function handleAnalysisGeneration(req, res) {
   try {
     const { prompt } = req.body;
     if (!prompt || typeof prompt !== 'string' || prompt.length > 15000) {
@@ -456,12 +477,14 @@ app.post('/api/generate/analysis', requireAuth, requireAiConsent, async (req, re
     console.error('Dashboard analysis failed');
     return res.status(500).json({ error: 'Server error' });
   }
-});
+}
 
-app.get('/api/health', (req, res) => res.json({ ok: true, redis: redis.status }));
+function handleHealth(req, res) {
+  return res.json({ ok: true, redis: redis.status });
+}
 
 // Usage endpoint: returns usage for provided X-Client-ID (must be valid UUID)
-app.get('/api/usage', async (req, res) => {
+async function handleUsage(req, res) {
   try {
     const clientId = req.get('X-Client-ID');
     if (!clientId || !isValidUUID(clientId)) {
@@ -497,10 +520,10 @@ app.get('/api/usage', async (req, res) => {
     console.error('Error in /api/usage', err);
     return res.status(500).json({ error: 'Server error' });
   }
-});
+}
 
 // Admin endpoint to retrieve request logs and blocked IPs (no auth for monitoring)
-app.get('/api/logs', (req, res) => {
+function handleLogs(req, res) {
   try {
     const logQuery = queryRequestLogs(requestLog, req.query);
     return res.json({
@@ -525,7 +548,25 @@ app.get('/api/logs', (req, res) => {
   } catch (error) {
     return res.status(400).json({ error: error.message });
   }
-});
+}
+
+app.post(`/api/${API_VERSION}/generate/website`, generateLimiter, generateLogger, handleWebsiteGeneration);
+app.post('/api/generate/website', generateLimiter, generateLogger, handleWebsiteGeneration);
+
+app.post(`/api/${API_VERSION}/generate/newsletter`, requireAiConsent, handleNewsletterGeneration);
+app.post('/api/generate/newsletter', requireAiConsent, handleNewsletterGeneration);
+
+app.post(`/api/${API_VERSION}/generate/analysis`, requireAiConsent, handleAnalysisGeneration);
+app.post('/api/generate/analysis', requireAiConsent, handleAnalysisGeneration);
+
+app.get(`/api/${API_VERSION}/health`, handleHealth);
+app.get('/api/health', handleHealth);
+
+app.get(`/api/${API_VERSION}/usage`, handleUsage);
+app.get('/api/usage', handleUsage);
+
+app.get(`/api/${API_VERSION}/logs`, handleLogs);
+app.get('/api/logs', handleLogs);
 
 app.listen(PORT, () => {
   console.log(`AI proxy server listening on port ${PORT}`);
