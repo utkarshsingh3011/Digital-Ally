@@ -8,6 +8,12 @@ import Redis from 'ioredis';
 import cron from 'node-cron';
 import { createLogger } from './logger.js';
 import { queryRequestLogs } from './logQuery.js';
+import { validateBody } from './validation/middleware.js';
+import {
+  serverPromptSchema,
+  serverNewsletterSchema,
+  serverAnalysisSchema,
+} from './validation/schemas.js';
 
 dotenv.config();
 
@@ -438,30 +444,12 @@ function hasSpamPatterns(str) {
 
 async function handleWebsiteGeneration(req, res) {
   try {
-    const { prompt, outputFormat = 'html' } = req.body; // Default to 'html'
-    
-    // Validate prompt exists and is a string
-    if (!prompt || typeof prompt !== 'string') {
-      return res.status(400).json({ error: 'Invalid prompt' });
-    }
+    const { prompt, outputFormat = 'html' } = req.validatedBody ?? req.body;
 
-    // Check prompt length (max 5000 chars)
-    if (prompt.length > 5000) {
-      return res.status(400).json({ error: 'Prompt exceeds maximum length of 5000 characters' });
-    }
-
-    // Strip non-printable characters
     let cleanedPrompt = stripNonPrintable(prompt);
 
-    // Detect spam patterns (same word >20 times)
     if (hasSpamPatterns(cleanedPrompt)) {
-      return res.status(400).json({ error: 'Prompt contains repeated patterns indicating spam' });
-    }
-
-    // Validate outputFormat
-    const allowedFormats = ['html', 'react', 'zip']; // Enabled 'zip' support
-    if (!allowedFormats.includes(outputFormat)) {
-      return res.status(400).json({ error: `Unsupported output format: '${outputFormat}'. Allowed formats are: ${allowedFormats.join(', ')}` });
+      return sendError(res, 400, 'SPAM_DETECTED', 'Prompt contains repeated patterns indicating spam');
     }
 
     let geminiPrompt = cleanedPrompt;
@@ -503,10 +491,7 @@ async function handleWebsiteGeneration(req, res) {
 
 async function handleNewsletterGeneration(req, res) {
   try {
-    const { prompt } = req.body;
-    if (!prompt || typeof prompt !== 'string' || prompt.length > 8000) {
-      return res.status(400).json({ error: 'Invalid prompt' });
-    }
+    const { prompt } = req.validatedBody ?? req.body;
 
     const text = await callGemini(prompt);
     return res.json({ text });
@@ -518,10 +503,7 @@ async function handleNewsletterGeneration(req, res) {
 
 async function handleAnalysisGeneration(req, res) {
   try {
-    const { prompt } = req.body;
-    if (!prompt || typeof prompt !== 'string' || prompt.length > 15000) {
-      return res.status(400).json({ error: 'Invalid prompt' });
-    }
+    const { prompt } = req.validatedBody ?? req.body;
 
     const text = await callGemini(prompt);
     return res.json({ text });
@@ -602,14 +584,14 @@ function handleLogs(req, res) {
   }
 }
 
-app.post(`/api/${API_VERSION}/generate/website`, generateLimiter, generateLogger, handleWebsiteGeneration);
-app.post('/api/generate/website', generateLimiter, generateLogger, handleWebsiteGeneration);
+app.post(`/api/${API_VERSION}/generate/website`, generateLimiter, generateLogger, validateBody(serverPromptSchema), handleWebsiteGeneration);
+app.post('/api/generate/website', generateLimiter, generateLogger, validateBody(serverPromptSchema), handleWebsiteGeneration);
 
-app.post(`/api/${API_VERSION}/generate/newsletter`, requireAiConsent, handleNewsletterGeneration);
-app.post('/api/generate/newsletter', requireAiConsent, handleNewsletterGeneration);
+app.post(`/api/${API_VERSION}/generate/newsletter`, requireAiConsent, validateBody(serverNewsletterSchema), handleNewsletterGeneration);
+app.post('/api/generate/newsletter', requireAiConsent, validateBody(serverNewsletterSchema), handleNewsletterGeneration);
 
-app.post(`/api/${API_VERSION}/generate/analysis`, requireAiConsent, handleAnalysisGeneration);
-app.post('/api/generate/analysis', requireAiConsent, handleAnalysisGeneration);
+app.post(`/api/${API_VERSION}/generate/analysis`, requireAiConsent, validateBody(serverAnalysisSchema), handleAnalysisGeneration);
+app.post('/api/generate/analysis', requireAiConsent, validateBody(serverAnalysisSchema), handleAnalysisGeneration);
 
 app.get(`/api/${API_VERSION}/health`, handleHealth);
 app.get('/api/health', handleHealth);
