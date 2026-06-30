@@ -2,6 +2,9 @@ import React, { useState, useCallback, useContext, useMemo } from 'react';
 import { sanitizePreviewHtml } from '@/utils/sanitize';
 import { AppContext } from '@/app/context/AppContext';
 import { useSpeechToText } from '@/hooks/useSpeechToText';
+import { useFormValidation } from '@/hooks/useFormValidation';
+import { modificationSchema } from '@/shared/validation';
+import { ValidatedField } from '@/components/ValidatedField';
 import {
   CheckIcon,
   CopyIcon,
@@ -50,6 +53,18 @@ export const OutputPanel: React.FC = () => {
     lang: language,
   });
 
+  const {
+    errors: modErrors,
+    markTouched: markModTouched,
+    validateAll: validateModification,
+    isFieldValid: isModFieldValid,
+    isFormValid: isModificationValid,
+  } = useFormValidation({
+    schema: modificationSchema,
+    values: { modificationPrompt },
+    t,
+  });
+
   // Parse rate limit error and convert to user-friendly message
   const parseRateLimitError = (
     errorMsg: string
@@ -87,13 +102,14 @@ export const OutputPanel: React.FC = () => {
     URL.revokeObjectURL(url);
   }, [generatedCode]);
 
-  const handleRegenerate = useCallback(() => {
-    if (!modificationPrompt.trim()) {
-      setError('Please provide modification instructions.');
-      return;
-    }
-    handleAssist();
-  }, [modificationPrompt, handleAssist, setError]);
+    const handleRegenerate = useCallback(() => {
+        const result = validateModification();
+        if (result.success === false) {
+            setError(result.firstError);
+            return;
+        }
+        handleAssist();
+    }, [validateModification, handleAssist, setError]);
 
   if (error && !generatedCode) {
     const { isRateLimit, message, retryMinutes } = parseRateLimitError(error);
@@ -236,12 +252,25 @@ export const OutputPanel: React.FC = () => {
           <h3 className="font-bold text-gray-800 mb-2">AI Assistant</h3>
           <p className="text-xs text-gray-500 mb-2">Describe changes you want to make</p>
           <div className="relative">
-            <textarea
-              value={modificationPrompt}
-              onChange={(e) => setModificationPrompt(e.target.value)}
-              placeholder="e.g., Make the headline bolder, change colors, add a contact form"
-              className="w-full mt-1 px-3 py-2 bg-gray-50 border border-gray-200 rounded-md focus:ring-2 focus:ring-lime-500 h-24 resize-y pr-10"
-            />
+            <ValidatedField
+              error={modErrors.modificationPrompt}
+              isValid={isModFieldValid('modificationPrompt')}
+              showSuccess
+            >
+              {(fieldProps) => (
+                <textarea
+                  {...fieldProps}
+                  value={modificationPrompt}
+                  onChange={(e) => {
+                    setModificationPrompt(e.target.value);
+                    markModTouched('modificationPrompt');
+                  }}
+                  onBlur={() => markModTouched('modificationPrompt')}
+                  placeholder="e.g., Make the headline bolder, change colors, add a contact form"
+                  className={`${fieldProps.className} mt-1 px-3 py-2 bg-gray-50 h-24 resize-y pr-10`}
+                />
+              )}
+            </ValidatedField>
             <button
               onClick={toggleListening}
               className={`absolute top-2 right-2 p-1.5 rounded-full ${
@@ -255,11 +284,11 @@ export const OutputPanel: React.FC = () => {
             </button>
           </div>
 
-          <button
-            onClick={handleRegenerate}
-            disabled={!modificationPrompt.trim()}
-            className="mt-4 w-full bg-green-500 text-white font-bold py-2.5 px-4 rounded-lg hover:bg-green-600 transition disabled:bg-gray-400"
-          >
+                    <button 
+                        onClick={handleRegenerate} 
+                        disabled={!isModificationValid} 
+                        className="mt-4 w-full bg-green-500 text-white font-bold py-2.5 px-4 rounded-lg hover:bg-green-600 transition disabled:bg-gray-400"
+                    >
             Apply Changes
           </button>
           {speechError && <p className="text-red-500 mt-2 text-xs">{speechError}</p>}

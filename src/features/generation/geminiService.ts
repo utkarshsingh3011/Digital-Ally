@@ -7,6 +7,17 @@ import {
 import { CONSENT_VERSION, loadPrivacyPreference } from '@/shared/privacy';
 
 interface WebsiteParams {
+    description: string;
+    userName: string;
+    businessName: string;
+    userEmail: string;
+    userPhone: string;
+    paletteName: string;
+    paletteDetails: string;
+    modificationPrompt?: string;
+    services?: string;
+    location?: string;
+    themeColor?: string;
   description: string;
   userName: string;
   businessName: string;
@@ -125,6 +136,38 @@ a{color:#166534}</style></head><body><main><section><p>Welcome to</p><h1>${title
 </section></main></body></html>`;
 }
 
+export async function generateWebsite(
+    { description, userName, businessName, userEmail, userPhone, paletteName, paletteDetails, modificationPrompt, services, location, themeColor }: WebsiteParams
+): Promise<string> {
+    if (loadPrivacyPreference()?.mode === 'local') {
+        return localWebsite({ description, userName, businessName, userEmail, userPhone, paletteName, paletteDetails, modificationPrompt, services, location, themeColor });
+    }
+    const modificationSection = modificationPrompt
+      ? `\n**Modification Request:** "${modificationPrompt}"`
+      : '';
+
+    const extraDetails = [
+      services ? `Services/Products: ${services}` : '',
+      location ? `Location: ${location}` : '',
+      themeColor ? `Preferred theme color: ${themeColor}` : '',
+    ].filter(Boolean).join('\n');
+
+    const enrichedDescription = extraDetails
+      ? `${description}\n\n${extraDetails}`
+      : description;
+
+    const textPrompt = PROMPT_TEMPLATE
+        .replace('{USER_NAME}', userName)
+        .replace('{BUSINESS_NAME}', businessName)
+        .replace('{USER_EMAIL}', userEmail)
+        .replace('{USER_PHONE}', userPhone)
+        .replace('{USER_INPUT}', enrichedDescription)
+        .replace('{PALETTE_NAME}', paletteName)
+        .replace('{PALETTE_DETAILS}', paletteDetails)
+        .replace('{MODIFICATION_SECTION}', modificationSection);
+
+    const data = await callProxy('/api/generate/website', { prompt: textPrompt });
+    return cleanResponse(data.html || data.text || '');
 export async function generateWebsite({
   description,
   userName,

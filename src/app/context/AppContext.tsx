@@ -2,6 +2,14 @@ import React, { useState, useCallback, createContext } from 'react';
 import { generateWebsite, generateNewsletter } from '@/features/generation/geminiService';
 import { LANGUAGES, TRANSLATIONS, COLOR_PALETTES } from '@/shared/constants';
 import { AppContextType } from '@/shared/types';
+import { AiProcessingMode, clearPrivacyPreference, loadPrivacyPreference, savePrivacyPreference } from '@/shared/privacy';
+import {
+  websiteFormSchema,
+  modificationSchema,
+  newsletterFormSchema,
+  sanitizeFormData,
+  validateSchema,
+} from '@/shared/validation';
 import {
   AiProcessingMode,
   clearPrivacyPreference,
@@ -45,6 +53,71 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setError(null);
   }, []);
 
+  const t = useCallback((key: string, params?: Record<string, string | number>): string => {
+    let message = TRANSLATIONS[language]?.[key] || TRANSLATIONS['en-US'][key] || key;
+    if (params) {
+      for (const [paramKey, paramValue] of Object.entries(params)) {
+        message = message.replace(`{${paramKey}}`, String(paramValue));
+      }
+    }
+    return message;
+  }, [language]);
+
+  const handleGenerateWrapper = useCallback(async (options?: { modPrompt?: string }) => {
+    const formData = sanitizeFormData({
+      userName,
+      businessName,
+      userEmail,
+      userPhone,
+      prompt,
+      services,
+      location,
+      themeColor,
+      selectedPalette,
+    });
+
+    const validation = validateSchema(websiteFormSchema, formData, t);
+    if (validation.success === false) {
+      setError(validation.firstError);
+      return;
+    }
+
+    const validated = validation.data;
+    
+    setLastPrompt(validated.prompt);
+    setPageState('loading');
+    setError(null);
+    setGeneratedUrl('');
+    setNewsletter('');
+
+    const modPrompt = options?.modPrompt;
+    
+    try {
+      const paletteDetails = COLOR_PALETTES.find(p => p.name === validated.selectedPalette)?.description || '';
+      const code = await generateWebsite({
+        description: validated.prompt,
+        userName: validated.userName,
+        businessName: validated.businessName,
+        userEmail: validated.userEmail,
+        userPhone: validated.userPhone,
+        paletteName: validated.selectedPalette,
+        paletteDetails,
+        modificationPrompt: modPrompt,
+        services: validated.services,
+        location: validated.location || undefined,
+        themeColor: validated.themeColor,
+      });
+      if (code.trim().toLowerCase().startsWith('<!doctype html')) {
+        setGeneratedCode(code);
+        setPageState('result');
+        const dataUrl = `data:text/html;charset=utf-8,${encodeURIComponent(code)}`;
+        setGeneratedUrl(dataUrl);
+        // Reset retry count on successful generation
+        setRetryCount(0);
+
+      } else {
+        setError(t('updateFailed'));
+        console.warn('AI service returned a non-HTML response');
   const t = useCallback(
     (key: string): string => {
       return TRANSLATIONS[language]?.[key] || TRANSLATIONS['en-US'][key];
@@ -103,6 +176,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setRetryCount((prev) => prev + 1);
       } finally {
         if (modPrompt) setModificationPrompt('');
+    }
+  }, [prompt, userName, businessName, userEmail, userPhone, selectedPalette, services, location, themeColor, generatedCode, t]);
+  
       }
     },
     [prompt, userName, businessName, userEmail, userPhone, selectedPalette, generatedCode, t]
@@ -111,6 +187,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const handleGenerate = () => handleGenerateWrapper();
 
   const handleAssist = useCallback(async () => {
+      const validation = validateSchema(
+        modificationSchema,
+        sanitizeFormData({ modificationPrompt }),
+        t,
+      );
+      if (validation.success === false) {
+          setError(validation.firstError);
+          return;
+      }
+      handleGenerateWrapper({ modPrompt: validation.data.modificationPrompt });
     if (!modificationPrompt.trim()) {
       setError(t('errorAssistant'));
       return;
@@ -119,7 +205,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [modificationPrompt, handleGenerateWrapper, t]);
 
   const handleGenerateNewsletter = useCallback(async () => {
-    if (!prompt || !businessName || !generatedUrl) return;
+    const validation = validateSchema(
+      newsletterFormSchema,
+      sanitizeFormData({ prompt, businessName, generatedUrl }),
+      t,
+    );
+    if (validation.success === false) {
+      setError(validation.firstError);
+      return;
+    }
     setIsGeneratingPost(true);
     setError(null);
     try {
