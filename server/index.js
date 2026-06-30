@@ -178,7 +178,20 @@ function requestLogger(req, res, next) {
 app.use(checkIPBlocklist);
 app.use(requestLogger);
 
-app.use(helmet());
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      ...helmet.contentSecurityPolicy.getDefaultDirectives(),
+      'frame-ancestors': ["'none'"],
+    },
+  },
+  frameguard: {
+    action: 'deny',
+  },
+  referrerPolicy: {
+    policy: 'strict-origin-when-cross-origin',
+  },
+}));
 app.use(cors());
 app.use(express.json({ limit: '128kb' }));
 app.use(['/api/generate/', `/api/${API_VERSION}/generate/`], (req, res, next) => {
