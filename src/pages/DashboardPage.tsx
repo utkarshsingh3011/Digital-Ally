@@ -3,6 +3,7 @@ import { AppContext } from '@/app/context/AppContext';
 import { useTextToSpeech } from '@/hooks/useTextToSpeech';
 import { analyzeAndTranslateDashboard } from '@/features/generation/geminiService';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
+import { LazyImage } from '@/components/LazyImage';
 import { 
     UserGroupIcon, CalendarDaysIcon, ChatBubbleOvalLeftEllipsisIcon,
     DocumentChartBarIcon, BuildingStorefrontIcon, SparklesIcon, ArrowRightIcon,
@@ -91,6 +92,12 @@ export const DashboardPage: React.FC = () => {
           </DashboardCard>
         )}
         <DashboardCard title={t('businessProfile')} icon={<BuildingStorefrontIcon className="w-7 h-7" />}>
+          <LazyImage
+            src="/images/placeholder.svg"
+            alt={`${businessName || 'Business'} storefront`}
+            className="w-full h-32 rounded-lg mb-4 object-cover"
+            wrapperClassName="w-full"
+          />
           <p><strong>{t('businessNamePlaceholder')}:</strong> {businessName}</p>
           <p><strong>{t('yourNamePlaceholder')}:</strong> {userName}</p>
           <p><strong>{t('emailPlaceholder')}:</strong> {userEmail}</p>
