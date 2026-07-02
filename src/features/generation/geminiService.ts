@@ -22,19 +22,27 @@ interface DashboardAnalysisParams {
     language: string;
 }
 
-const CLIENT_ID_KEY = 'x-client-id';
+type AiTask = 'website' | 'newsletter' | 'analysis';
 
-// Generate or retrieve session fingerprint
+const CLIENT_ID_KEY = 'x-client-id';
+const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
+
 function getOrCreateClientID(): string {
     if (typeof window === 'undefined') return '';
-    
+
     const stored = sessionStorage.getItem(CLIENT_ID_KEY);
     if (stored) return stored;
 
-    // Generate new UUID for this session
     const clientID = crypto.randomUUID();
     sessionStorage.setItem(CLIENT_ID_KEY, clientID);
     return clientID;
+}
+
+function getClientToken(): string | null {
+    const envToken = import.meta.env.VITE_SERVER_CLIENT_TOKEN;
+    if (envToken) return envToken;
+    if (typeof window === 'undefined') return null;
+    return localStorage.getItem('sessionToken');
 }
 
 const cleanResponse = (text: string): string => {
@@ -45,40 +53,54 @@ const cleanResponse = (text: string): string => {
         cleanedText = cleanedText.substring(3, cleanedText.length - 3).trim();
     }
     return cleanedText;
-}
+};
 
-async function callProxy(endpoint: string, body: any) {
+/**
+ * All remote AI requests go through the centralized backend gateway.
+ * The Gemini API key never leaves the server.
+ */
+async function callAiGateway(task: AiTask, body: Record<string, unknown>) {
     const preference = loadPrivacyPreference();
     if (!preference) throw new Error('Choose a privacy setting before using AI features.');
     if (preference.mode === 'local') throw new Error('Remote AI is disabled in local-only mode.');
 
-    const token = typeof window !== 'undefined' ? localStorage.getItem('sessionToken') : null;
-    const headers: Record<string,string> = {
+    const token = getClientToken();
+    if (!token) {
+        throw new Error(
+            'Server client token not configured. Set VITE_SERVER_CLIENT_TOKEN in your .env file (same value as SERVER_CLIENT_TOKEN on the server).'
+        );
+    }
+
+    const headers: Record<string, string> = {
         'Content-Type': 'application/json',
         'X-AI-Consent': CONSENT_VERSION,
+        'X-Client-ID': getOrCreateClientID(),
+        Authorization: `Bearer ${token}`,
     };
-    if (token) headers['Authorization'] = `Bearer ${token}`;
 
-    const res = await fetch(endpoint, {
+    const res = await fetch(`${API_BASE}/api/v1/ai/generate`, {
         method: 'POST',
         headers,
-        body: JSON.stringify(body),
+        body: JSON.stringify({ task, ...body }),
     });
 
     if (res.status === 401) throw new Error('Unauthorized: server requires authentication.');
-    
+    if (res.status === 428) throw new Error('Current AI processing consent is required.');
+
     if (res.status === 429) {
         const retryAfter = res.headers.get('Retry-After');
-        const errorMsg = `RATE_LIMIT_429|${retryAfter || '900'}`;
-        throw new Error(errorMsg);
+        throw new Error(`RATE_LIMIT_429|${retryAfter || '900'}`);
     }
-    
+
     if (!res.ok) {
         const err = await res.text();
         throw new Error(`Server error: ${err}`);
     }
 
     const data = await res.json();
+    if (data?.error?.message) {
+        throw new Error(data.error.message);
+    }
     return data;
 }
 
@@ -131,7 +153,7 @@ export async function generateWebsite(
         .replace('{PALETTE_DETAILS}', paletteDetails)
         .replace('{MODIFICATION_SECTION}', modificationSection);
 
-    const data = await callProxy('/api/generate/website', { prompt: textPrompt });
+    const data = await callAiGateway('website', { prompt: textPrompt });
     return cleanResponse(data.html || data.text || '');
 }
 
@@ -145,7 +167,7 @@ export async function generateNewsletter(
         .replace('{BUSINESS_NAME}', businessName)
         .replace('{USER_INPUT}', description);
 
-    const data = await callProxy('/api/generate/newsletter', { prompt: finalPrompt });
+    const data = await callAiGateway('newsletter', { prompt: finalPrompt });
     return cleanResponse(data.html || data.text || '');
 }
 
@@ -162,6 +184,6 @@ export async function analyzeAndTranslateDashboard(
         .replace('{LANGUAGE_NAME}', langDetails.label)
         .replace('{LANGUAGE_CODE}', langDetails.value);
 
-    const data = await callProxy('/api/generate/analysis', { prompt: finalPrompt });
+    const data = await callAiGateway('analysis', { prompt: finalPrompt });
     return cleanResponse(data.html || data.text || '');
 }
