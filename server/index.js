@@ -11,6 +11,8 @@ import cron from 'node-cron';
 import { createLogger } from './logger.js';
 import { queryRequestLogs } from './logQuery.js';
 import { validateBody } from './validation/middleware.js';
+import swaggerJSDoc from 'swagger-jsdoc';
+import swaggerUi from 'swagger-ui-express';
 import {
   serverPromptSchema,
   serverNewsletterSchema,
@@ -24,6 +26,42 @@ dotenv.config({ path: path.join(__dirname, '.env') });
 dotenv.config();
 
 const app = express();
+// Swagger configuration options
+const swaggerOptions = {
+  definition: {
+    openapi: '3.0.0',
+    info: {
+      title: 'Digital Ally API Gateway',
+      version: '1.0.0',
+      description: 'Comprehensive API documentation for AI content generation and usage tracking templates.',
+    },
+    servers: [
+      {
+        url: `http://localhost:${PORT}`,
+        description: 'Local Development Server',
+      },
+    ],
+    components: {
+      securitySchemes: {
+        BearerAuth: {
+          type: 'http',
+          scheme: 'bearer',
+          bearerFormat: 'JWT',
+          description: 'Enter your SERVER_CLIENT_TOKEN behind a Bearer scheme.',
+        },
+      },
+    },
+  },
+  // Path to the API docs inside your backend entry file
+  apis: ['./server/index.js'],
+};
+
+const swaggerSpec = swaggerJSDoc(swaggerOptions);
+
+// Serve the interactive Swagger UI panel 
+app.use(`/api/${API_VERSION}/docs`, swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+// Legacy fallback endpoint route
+app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
 function sendSuccess(res, statusCode, data, meta = null) {
   return res.status(statusCode).json({
@@ -626,3 +664,53 @@ process.on('SIGINT', async () => {
   if (redis?.status === 'ready') await redis.quit();
   process.exit(0);
 });
+
+/**
+ * @openapi
+ * /api/v1/ai/generate:
+ *   post:
+ *     summary: Centralized AI gateway for asset generation tasks
+ *     description: Leverages underlying Gemini LLM models to generate websites, newsletters, or performance analyses.
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - task
+ *               - prompt
+ *             properties:
+ *               task:
+ *                 type: string
+ *                 enum: [website, newsletter, analysis]
+ *                 description: The primary AI processing directive assignment.
+ *               prompt:
+ *                 type: string
+ *                 description: High-level instructions describing what you want the model to generate.
+ *               outputFormat:
+ *                 type: string
+ *                 enum: [html, react, zip]
+ *                 default: html
+ *                 description: Target formatting structure (applicable heavily for website tasks).
+ *     responses:
+ *       200:
+ *         description: Successfully generated content returned payload.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 html:
+ *                   type: string
+ *                 text:
+ *                   type: string
+ *       400:
+ *         description: Validation parameters or structural integrity mismatch errors.
+ *       401:
+ *         description: Missing or malformed authentication schema token context.
+ *       429:
+ *         description: Request volume rate limiting constraints or daily/monthly quote caps exceeded.
+ */
