@@ -24,7 +24,7 @@ export interface AppContextType {
   setError: (error: string | null) => void;
   handleGenerate: () => Promise<void>;
   reset: () => void;
-  t: (key: string) => string;
+  t: (key: string, params?: Record<string, string | number>) => string;
   modificationPrompt: string;
   setModificationPrompt: (prompt: string) => void;
   handleAssist: () => Promise<void>;
@@ -46,6 +46,12 @@ export interface AppContextType {
   retryCount: number;
   setRetryCount: (count: number) => void;
   handleRetry: () => Promise<void>;
+  healthStatus: {
+    ok: boolean;
+    checked: boolean;
+    retrying: boolean;
+    message: string;
+  };
 }
 
 export enum OutputView {

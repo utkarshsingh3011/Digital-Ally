@@ -13,7 +13,9 @@ Digital Ally (formerly BizBoost) is an advanced AI-powered platform designed to 
 - **Customization**: Choose from curated color palettes and modify generated designs with follow-up prompts.
 - **Multi-Language Support**: Interactive interface supporting multiple languages.
 - **Live Preview & Code Export**: View changes in real-time and export clean, deployment-ready HTML/CSS code.
+- **Lazy Image Loading**: Images load on demand via Intersection Observer with placeholders and fallbacks for faster page loads.
 - **Privacy Controls**: Versioned consent before remote AI processing, local-only generation, and one-click data deletion.
+- **Backend AI Gateway**: All remote AI requests route through a secured Express API with server-managed secrets, quotas, and audit logging.
 
 ## 🛠️ Tech Stack
 
@@ -41,29 +43,39 @@ npm install
 
 ### Configure Environment Variables
 
-Copy the example file:
+**Client** (`.env` in project root):
 
 ```bash
 cp .env.example .env
 ```
 
-Update the values:
+```env
+# Gateway token — same value as SERVER_CLIENT_TOKEN in server/.env (NOT the Gemini key)
+VITE_SERVER_CLIENT_TOKEN=replace_with_secure_random_token
+```
+
+**Server** (`server/.env` — holds all secrets):
+
+```bash
+cp server/.env.example server/.env
+```
 
 ```env
 GEMINI_API_KEY=your_gemini_api_key
-GEMINI_MODEL=gemini-2.5-flash
 SERVER_CLIENT_TOKEN=replace_with_secure_random_token
+GEMINI_MODEL=gemini-2.5-flash
 AI_CONSENT_VERSION=2026-06-21
+ADMIN_TOKEN=replace_with_admin_token
 
 # Optional Redis Configuration
 REDIS_HOST=localhost
 REDIS_PORT=6379
-
-# Optional Server Configuration
 PORT=5174
 DAILY_QUOTA=100
 MONTHLY_QUOTA=1000
 ```
+
+> **Important:** The Gemini API key lives only in `server/.env`. The browser uses `VITE_SERVER_CLIENT_TOKEN` to authenticate with the backend gateway — never embed API keys in the frontend.
 
 ---
 
@@ -93,6 +105,10 @@ Default API URL:
 http://localhost:5174
 ```
 
+## 🩺 Server Health Check
+
+The backend now exposes a health endpoint at `/api/health` that verifies the Gemini API key is present and that the Gemini API can be reached before generation requests are allowed. The frontend checks this endpoint on startup, displays a warning if the server is misconfigured, and disables the generation buttons until the health check passes.
+
 ## 📜 Available Scripts
 
 | Script | Description |
@@ -104,6 +120,18 @@ http://localhost:5174
 | npm run lint:architecture | Alias for the structure and naming check |
 | npm run preview | Preview production build locally |
 | npm run start:server | Start Express AI proxy server |
+| npm test | Run unit tests (including lazy-loading) |
+| npm run test:watch | Run tests in watch mode |
+
+## 🖼️ Lazy Image Loading
+
+Digital Ally defers image downloads until they are near the viewport to improve initial page load performance.
+
+- **`LazyImage` component** (`src/components/LazyImage.tsx`): Wraps `react-lazy-load-image-component` with blur placeholders, `loading="lazy"`, and automatic fallback to `/images/fallback.svg` on error.
+- **HTML preview enhancement** (`src/lib/lazy-loading/`): Generated website previews automatically receive `loading="lazy"`, `decoding="async"`, and skeleton styles.
+- **Assets**: Placeholder and fallback SVGs live in `public/images/`.
+
+See [docs/LAZY_LOADING.md](docs/LAZY_LOADING.md) for usage examples and implementation details.
 
 ## 🛡️ Privacy
 
